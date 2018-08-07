@@ -23,15 +23,19 @@ package org.pac4j.play;
  */
 public interface Constants {
 
-    public final static String SESSION_ID = "pac4jSessionId";
+    public static final String SESSION_ID = "pac4jSessionId";
 
-    public final static String REDIRECT_URL_LOGOUT_PARAMETER_NAME = "url";
+    public static final String REDIRECT_URL_LOGOUT_PARAMETER_NAME = "url";
 
-    public final static String CLIENT_NAME = "clientName";
+    public static final String CLIENT_NAME = "clientName";
 
-    public final static String TARGET_URL = "targetUrl";
+    public static final String TARGET_URL = "targetUrl";
 
-    public final static String IS_AJAX = "isAjax";
+    public static final String IS_AJAX = "isAjax";
 
-    public final static String SEPARATOR = "$";
+    public static final String REQUIRE_ANY_ROLE = "requireAnyRole";
+
+    public static final String REQUIRE_ALL_ROLES = "requireAllRoles";
+
+    public static final String SEPARATOR = "$";
 }

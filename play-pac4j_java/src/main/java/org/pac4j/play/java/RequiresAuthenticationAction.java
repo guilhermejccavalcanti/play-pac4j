@@ -18,7 +18,7 @@ package org.pac4j.play.java;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
-
+import org.apache.commons.lang3.StringUtils;
 import org.pac4j.core.client.BaseClient;
 import org.pac4j.core.client.Client;
 import org.pac4j.core.client.RedirectAction;
@@ -34,7 +34,6 @@ import org.pac4j.play.Constants;
 import org.pac4j.play.StorageHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import play.libs.F.Function0;
 import play.libs.F.Promise;
 import play.mvc.Action;
@@ -69,6 +68,24 @@ public final class RequiresAuthenticationAction extends Action<Result> {
         }
     }
 
+    private static final Method requireAnyRoleMethod;
+
+    private static final Method requireAllRolesMethod;
+
+    static {
+        try {
+            clientNameMethod = RequiresAuthentication.class.getDeclaredMethod(Constants.CLIENT_NAME);
+            targetUrlMethod = RequiresAuthentication.class.getDeclaredMethod(Constants.TARGET_URL);
+            isAjaxMethod = RequiresAuthentication.class.getDeclaredMethod(Constants.IS_AJAX);
+            requireAnyRoleMethod = RequiresAuthentication.class.getDeclaredMethod(Constants.REQUIRE_ANY_ROLE);
+            requireAllRolesMethod = RequiresAuthentication.class.getDeclaredMethod(Constants.REQUIRE_ALL_ROLES);
+        } catch (final SecurityException e) {
+            throw new RuntimeException(e);
+        } catch (final NoSuchMethodException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     @Override
     @SuppressWarnings("unchecked")
     public Promise<Result> call(final Context context) throws Throwable {
@@ -79,16 +96,42 @@ public final class RequiresAuthenticationAction extends Action<Result> {
         logger.debug("targetUrl : {}", targetUrl);
         final Boolean isAjax = (Boolean) invocationHandler.invoke(this.configuration, isAjaxMethod, null);
         logger.debug("isAjax : {}", isAjax);
+        final String requireAnyRole = (String) invocationHandler.invoke(this.configuration, requireAnyRoleMethod, null);
+        logger.debug("requireAnyRole : {}", requireAnyRole);
+        final String requireAllRoles = (String) invocationHandler.invoke(this.configuration, requireAllRolesMethod, null);
+        logger.debug("requireAllRoles : {}", requireAllRoles);
         // get or create session id
         final String sessionId = StorageHelper.getOrCreationSessionId(context.session());
         logger.debug("sessionId : {}", sessionId);
         final CommonProfile profile = StorageHelper.getProfile(sessionId);
         logger.debug("profile : {}", profile);
-        // has a profile -> access resource
+        // has a profile
         if (profile != null) {
-            return this.delegate.call(context);
-        }
+            boolean access = true;
+            if (StringUtils.isNotBlank(requireAnyRole)) {
+                final String[] expectedRoles = StringUtils.split(requireAnyRole, ",");
+                // not the expected role -> 403
+                if (!profile.hasAnyRole(expectedRoles)) {
+                    access = false;
+                }
+            } else if (StringUtils.isNotBlank(requireAllRoles)) {
+                final String[] expectedRoles = StringUtils.split(requireAllRoles, ",");
+                // not all the expected roles -> 403
+                if (!profile.hasAllRoles(expectedRoles)) {
+                    access = false;
+                }
+            }
+            if (access) {
+                return this.delegate.call(context);
+            } else {
+                return Promise.promise(new Function0<Result>() {
 
+                    public Result apply() {
+                        return forbidden(Config.getErrorPage403()).as(Constants.HTML_CONTENT_TYPE);
+                    }
+                });
+            }
+        }
         // requested url to save
         final String requestedUrlToSave = CallbackController.defaultUrl(targetUrl, context.request().uri());
         logger.debug("requestedUrlToSave : {}", requestedUrlToSave);
@@ -97,17 +140,16 @@ public final class RequiresAuthenticationAction extends Action<Result> {
         final Client<Credentials, UserProfile> client = Config.getClients().findClient(clientName);
         logger.debug("client : {}", client);
         Promise<Result> promise = Promise.promise(new Function0<Result>() {
+
             @SuppressWarnings("rawtypes")
             public Result apply() {
                 try {
                     // and compute redirection url
-                    JavaWebContext webContext = new JavaWebContext(context.request(), context.response(), context
-                            .session());
+                    JavaWebContext webContext = new JavaWebContext(context.request(), context.response(), context.session());
                     final RedirectAction action = ((BaseClient) client).getRedirectAction(webContext, true, isAjax);
                     logger.debug("redirectAction : {}", action);
                     return convertToPromise(action);
                 } catch (final RequiresHttpAction e) {
-                    // requires some specific HTTP action
                     final int code = e.getCode();
                     logger.debug("requires HTTP action : {}", code);
                     if (code == HttpConstants.UNAUTHORIZED) {
@@ -125,13 +167,13 @@ public final class RequiresAuthenticationAction extends Action<Result> {
     }
 
     private Result convertToPromise(RedirectAction action) {
-        switch (action.getType()) {
-        case REDIRECT:
-            return redirect(action.getLocation());
-        case SUCCESS:
-            return ok(action.getContent()).as(HttpConstants.HTML_CONTENT_TYPE);
-        default:
-            throw new TechnicalException("Unsupported RedirectAction type " + action.getType());
+        switch(action.getType()) {
+            case REDIRECT:
+                return redirect(action.getLocation());
+            case SUCCESS:
+                return ok(action.getContent()).as(HttpConstants.HTML_CONTENT_TYPE);
+            default:
+                throw new TechnicalException("Unsupported RedirectAction type " + action.getType());
         }
     }
 }
